@@ -1,0 +1,61 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# ViewFinder 手机相机配置（ORB-SLAM3 monocular）
+# 对应 sample_videos/seq：720x1280（竖屏 720P）、30fps、401 帧
+# 用法：
+#   ./bin/tum_mono ./ORB-SLAM3/Vocabulary/ORBvoc.txt \
+#       ./cfg/ORB_SLAM3/Monocular/TUM/phone_720p.yaml \
+#       ./cfg/gaussian_mapper/Monocular/TUM/tum_mono.yaml \
+#       <seq目录> <输出目录> no_viewer
+#--------------------------------------------------------------------------------------------
+File.version: "1.0"
+
+Camera.type: "PinHole"
+
+# 相机内参（单位：像素）。
+# 当前为粗略起步值（fx=fy=720，主点取图像中心）。后续拿到手机真实内参后替换。
+Camera1.fx: 720.0
+Camera1.fy: 720.0
+Camera1.cx: 360.0
+Camera1.cy: 640.0
+
+# 畸变（OpenCV 径向+切向模型）。未知，先全填 0。
+Camera1.k1: 0.0
+Camera1.k2: 0.0
+Camera1.p1: 0.0
+Camera1.p2: 0.0
+Camera1.k3: 0.0
+
+# 帧率：必须与 ffmpeg 抽帧帧率、rgb.txt 时间戳步长一致（1/30）
+Camera.fps: 30
+
+# 颜色顺序（0: BGR, 1: RGB）。ffmpeg 抽出的 PNG 是 RGB。
+Camera.RGB: 1
+
+# 分辨率：必须与实际喂进去的帧一致（sample_videos/seq/rgb 为 720x1280）
+Camera.width: 720
+Camera.height: 1280
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters（保持默认）
+#--------------------------------------------------------------------------------------------
+ORBextractor.nFeatures: 2000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters（headless 加 no_viewer 时忽略，保持默认）
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0

@@ -1,0 +1,11 @@
+{
+  "name": "viewfinder-splat-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local 3DGS browser viewer for ViewFinder splat outputs",
+  "dependencies": {
+    "@mkkellogg/gaussian-splats-3d": "^0.4.7",
+    "three": "^0.186.0"
+  }
+}

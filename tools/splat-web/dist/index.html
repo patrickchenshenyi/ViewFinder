@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Viewfinder · 3DGS 本地查看器</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    font: 13px/1.5 -apple-system, "SF Pro Text", "PingFang SC", Helvetica, sans-serif;
+    background: #0d0f14; color: #e8eaf0; }
+  .viewer-host { position: fixed; inset: 0; z-index: 0; }
+  #hud { position: fixed; top: 14px; left: 14px; z-index: 10;
+    background: rgba(16,19,26,.82); backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,.09); border-radius: 12px;
+    padding: 12px 14px; min-width: 250px; box-shadow: 0 8px 30px rgba(0,0,0,.45); }
+  #title { font-weight: 600; font-size: 13px; letter-spacing: .2px; }
+  #meta { margin-top: 6px; color: #98a0b3; font-size: 11.5px; white-space: pre-line; }
+  #status { margin-top: 8px; font-size: 11.5px; color: #7fd1ff; min-height: 16px; }
+  #status.err { color: #ff8080; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  button { font: inherit; font-size: 11.5px; color: #dfe3ec; cursor: pointer;
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.13);
+    border-radius: 7px; padding: 5px 9px; }
+  button:hover { background: rgba(255,255,255,.14); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  a.dlink { font: inherit; font-size: 11.5px; color: #dfe3ec; text-decoration: none;
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.13);
+    border-radius: 7px; padding: 5px 9px; }
+  a.dlink:hover { background: rgba(255,255,255,.14); }
+  a.dlink.disabled { opacity: .4; pointer-events: none; }
+  .ctl { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.09);
+    display: flex; flex-direction: column; gap: 9px; }
+  .ctl label { display: block; font-size: 11.5px; color: #aab2c4; }
+  .ctl output { float: right; color: #7fd1ff; font-variant-numeric: tabular-nums; }
+  .ctl input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #7fd1ff; height: 16px; }
+  .ctl label.chk { display: flex; align-items: center; gap: 6px; color: #cfd6e4; }
+  .ctl label.chk input { accent-color: #7fd1ff; }
+  #tip { margin-top: 8px; color: #7b8398; font-size: 11px; }
+  #drop { position: fixed; inset: 0; z-index: 20; display: none;
+    align-items: center; justify-content: center; pointer-events: none;
+    background: rgba(13,15,20,.72); border: 3px dashed #7fd1ff; }
+  #drop.on { display: flex; }
+  #drop span { font-size: 17px; color: #cfe8ff; }
+  #hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+    z-index: 10; color: #7b8398; font-size: 11.5px; background: rgba(16,19,26,.7);
+    border-radius: 999px; padding: 5px 14px; }
+  #hudShow { position: fixed; top: 14px; left: 14px; z-index: 11; display: none; }
+  body.hud-off #hud, body.hud-off #hint { display: none; }
+  body.hud-off #hudShow { display: block; }
+  #framingPanel { position: fixed; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center; background: rgba(0,0,0,.72); }
+  #framingPanel.on { display: flex; }
+  #framingBox { background: #12151d; border: 1px solid rgba(255,255,255,.14);
+    border-radius: 12px; padding: 16px; max-width: 1120px; max-height: 88vh; overflow: auto; }
+  #framingBox h3 { margin: 0 0 4px; font-size: 14px; }
+  #framingBox .sub { color: #98a0b3; font-size: 11.5px; margin-bottom: 12px; }
+  #framingClose { float: right; }
+  .frec { display: flex; gap: 12px; margin-bottom: 14px; align-items: flex-start; }
+  .frec img { width: 360px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); }
+  .frec .txt { color: #cfd6e4; font-size: 12.5px; line-height: 1.5; flex: 1; }
+  .frec .txt b { color: #7fd1ff; }
+  .fnote { color: #f0b65a; font-size: 12px; background: rgba(240,182,90,.08);
+    border: 1px solid rgba(240,182,90,.25); border-radius: 6px; padding: 6px 10px; margin-bottom: 12px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "@mkkellogg/gaussian-splats-3d": "./vendor/gs3d/gaussian-splats-3d.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<!-- 3DGS 画布宿主由 app.js 动态创建（每个查看器实例一个）。
+     GS3D 的 dispose() 会把 rootElement 从 body 移除，故不能复用固定容器。 -->
+
+<div id="hud">
+  <div id="title">Viewfinder · 3DGS 本地查看器</div>
+  <div id="meta">等待加载…</div>
+  <div id="status"></div>
+  <div class="row">
+    <button id="open">打开本地文件…</button>
+    <button id="reset">重置视角</button>
+    <button id="hudToggle">隐藏面板 (H)</button>
+  </div>
+  <div id="liveBar" class="row" style="display:none">
+    <button id="liveStart">▶ 开始推流</button>
+    <button id="liveStop">⏹ 停止推流</button>
+    <button id="liveRestart">🔄 重新开始</button>
+    <span id="liveLabel" style="color:#7fd1ff;font-size:11.5px;align-self:center">点「开始」后先静止 2–3 秒，再缓慢扫动</span>
+  </div>
+  <div id="camBar" class="row" style="display:none">
+    <button id="camPrev">◀ 上一个训练视角</button>
+    <button id="camNext">下一个 ▶</button>
+    <span id="camLabel" style="color:#7fd1ff;font-size:11.5px;align-self:center"></span>
+  </div>
+  <div id="modelBar" class="row">
+    <button id="modelOrig">原始模型（M0→M5）</button>
+    <button id="modelProc">除雾模型</button>
+    <a id="dlOrig" class="dlink" href="splats/m5_original.ply" download>⬇ 原始</a>
+    <a id="dlProc" class="dlink" href="splats/m6_processed.ply" download>⬇ 除雾</a>
+    <button id="framingBtn">🖼 帮我构图</button>
+  </div>
+  <div id="caseBar" class="row">
+    <label style="font-size:11.5px;color:#aab2c4;align-self:center">云 case</label>
+    <select id="caseSel" style="font:inherit;font-size:11.5px;color:#dfe3ec;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);border-radius:7px;padding:4px 6px;max-width:220px"></select>
+    <button id="caseRefresh">刷新</button>
+    <button id="caseDelete" style="font:inherit;font-size:11.5px;color:#ffb3b3;background:rgba(255,255,255,.07);border:1px solid rgba(255,120,120,.35);border-radius:7px;padding:4px 8px">🗑 删除所选</button>
+  </div>
+  <div class="ctl">
+    <label>高斯尺寸 <output id="sscaleVal">1.00x</output>
+      <input id="sscale" type="range" min="-2" max="1" step="0.05" value="0">
+    </label>
+    <label>单个高斯屏幕尺寸上限 <output id="capVal">不限</output>
+      <input id="cap" type="range" min="0" max="640" step="16" value="0">
+    </label>
+    <label>低不透明度剔除 <output id="alphaVal">1</output>
+      <input id="alpha" type="range" min="1" max="20" step="1" value="1">
+    </label>
+    <label class="chk"><input id="aa" type="checkbox"> 抗锯齿 Mip 滤波（会柔化，默认关）</label>
+    <div id="tip">尺寸倍率实时生效；「屏幕尺寸上限」用来压掉少数超大高斯（松手后重渲染约 1 秒）。</div>
+  </div>
+</div>
+
+<div id="drop"><span>松手即加载高斯泼溅文件（.ply / .splat / .ksplat）</span></div>
+<button id="hudShow">显示面板 (H)</button>
+<div id="hint">左键拖拽旋转 · 滚轮缩放 · 右键平移 · 也可把 .ply 拖到页面里</div>
+<input id="file" type="file" accept=".ply,.splat,.ksplat,.zip" hidden>
+
+<div id="framingPanel">
+  <div id="framingBox">
+    <button id="framingClose">✕ 关闭</button>
+    <h3>构图建议 Top-3</h3>
+    <div class="sub">基于除雾模型 · deepseek-v4-flash-vision-exp 点评</div>
+    <div id="framingList"></div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

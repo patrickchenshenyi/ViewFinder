@@ -1,0 +1,11 @@
+Cuda compilation tools, release 12.1, V12.1.105
+Build cuda_12.1.r12.1/compiler.32688072_0
+node: v18.17.1
+npm: 9.6.7
+ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021 the FFmpeg developers
+NVIDIA GeForce RTX 4090, 580.126.20
+system python3: Python 3.10.12
+conda base: Python 3.11.4
+conda myconda: Python 3.12.4
+libtorch: /root/libtorch
+opencv cmake: /usr/local/lib/cmake/opencv4

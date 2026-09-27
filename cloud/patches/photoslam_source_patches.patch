@@ -1,0 +1,553 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0af66f0..2bc5b3d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -77,7 +77,7 @@ add_library(cuda_rasterizer SHARED
+     cuda_rasterizer/rasterizer_impl.cu
+     cuda_rasterizer/rasterizer_impl.h
+     cuda_rasterizer/stereo_vision.h)
+-set_target_properties(cuda_rasterizer PROPERTIES CUDA_ARCHITECTURES "75;86")
++set_target_properties(cuda_rasterizer PROPERTIES CUDA_ARCHITECTURES "89")
+ # target_compile_features(cuda_rasterizer PUBLIC cxx_std_17)
+ target_include_directories(cuda_rasterizer PRIVATE
+     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+diff --git a/build.sh b/build.sh
+index 5520831..8c017ea 100755
+--- a/build.sh
++++ b/build.sh
+@@ -1,26 +1,26 @@
++set -e
+ # DBoW2
+ cd ./ORB-SLAM3/Thirdparty/DBoW2
+-mkdir build
++mkdir -p build
+ cd build
+-cmake .. -DCMAKE_BUILD_TYPE=Release # add OpenCV_DIR definitions if needed, example:
+-#cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/home/rapidlab/libs/opencv/lib/cmake/opencv4
+-make -j
++cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/usr/local/lib/cmake/opencv4
++make -j4
+ 
+ cd ../../g2o
+ 
+ # g2o
+-mkdir build
++mkdir -p build
+ cd build
+-cmake .. -DCMAKE_BUILD_TYPE=Release
+-make -j
++cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/usr/local/lib/cmake/opencv4
++make -j4
+ 
+ cd ../../Sophus
+ 
+ # Sophus
+-mkdir build
++mkdir -p build
+ cd build
+-cmake .. -DCMAKE_BUILD_TYPE=Release
+-make -j
++cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/usr/local/lib/cmake/opencv4
++make -j4
+ 
+ # ORB_SLAM3
+ cd ../../../Vocabulary
+@@ -28,17 +28,15 @@ echo "Uncompress vocabulary ..."
+ tar -xf ORBvoc.txt.tar.gz
+ cd ..
+ 
+-mkdir build
++mkdir -p build
+ cd build
+-cmake .. -DCMAKE_BUILD_TYPE=Release # add OpenCV_DIR definitions if needed, example:
+-#cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/home/rapidlab/libs/opencv/lib/cmake/opencv4
+-make -j8
++cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/usr/local/lib/cmake/opencv4
++make -j4
+ 
+ # Photo-SLAM
+ echo "Building Photo-SLAM ..."
+ cd ../..
+-mkdir build
++mkdir -p build
+ cd build
+-cmake .. # add Torch_DIR and/or OpenCV_DIR definitions if needed, example:
+-#cmake .. -DTorch_DIR=/home/rapidlab/libs/libtorch/share/cmake/Torch -DOpenCV_DIR=/home/rapidlab/libs/opencv/lib/cmake/opencv4
+-make -j8
++cmake .. -DTorch_DIR=/root/libtorch/share/cmake/Torch -DOpenCV_DIR=/usr/local/lib/cmake/opencv4
++make -j4
+diff --git a/cfg/gaussian_mapper/Monocular/TUM/tum_mono.yaml b/cfg/gaussian_mapper/Monocular/TUM/tum_mono.yaml
+index 10c30c2..d9d44bb 100644
+--- a/cfg/gaussian_mapper/Monocular/TUM/tum_mono.yaml
++++ b/cfg/gaussian_mapper/Monocular/TUM/tum_mono.yaml
+@@ -52,7 +52,7 @@ Record.record_loop_ply: 0 # 0:false, 1 or other integer:true
+ #--------------------------------------------------------------------------------------------
+ 
+ # Learning rate
+-Optimization.max_num_iterations: 30100
++Optimization.max_num_iterations: 15000
+ Optimization.position_lr_init: 0.00032 #0.00016
+ Optimization.position_lr_final: 0.00032
+ Optimization.position_lr_delay_mult: 0.01
+@@ -66,11 +66,11 @@ Optimization.rotation_lr: 0.001 #0.001
+ Optimization.percent_dense: 0.01
+ Optimization.lambda_dssim: 0.2
+ Optimization.densification_interval: 100
+-Optimization.opacity_reset_interval: 0  # 0:never, 1:always, others:periodically
+-Optimization.prune_big_point_after_iter: 30000
++Optimization.opacity_reset_interval: 3000  # 0:never, 1:always, others:periodically
++Optimization.prune_big_point_after_iter: 15000
+ Optimization.densify_min_opacity: 0.1 #0.005
+ Optimization.densify_from_iter: 800
+-Optimization.densify_until_iter: 30000
++Optimization.densify_until_iter: 15000
+ Optimization.densify_grad_threshold: 0.001
+ 
+ #--------------------------------------------------------------------------------------------
+diff --git a/examples/tum_mono.cpp b/examples/tum_mono.cpp
+index 8ba7c60..5073477 100644
+--- a/examples/tum_mono.cpp
++++ b/examples/tum_mono.cpp
+@@ -63,19 +63,10 @@ int main(int argc, char **argv)
+         output_directory += "/";
+     std::filesystem::path output_dir(output_directory);
+ 
+-    // Retrieve paths to images
++    // Retrieve paths to images (incremental mode: poll rgb.txt continuously)
+     std::vector<std::string> vstrImageFilenamesRGB;
+     std::vector<double> vTimestamps;
+     std::string strFile = std::string(argv[4]) + "/rgb.txt";
+-    LoadImages(strFile, vstrImageFilenamesRGB, vTimestamps);
+-
+-    // Check consistency in the number of images and depthmaps
+-    int nImages = vstrImageFilenamesRGB.size();
+-    if (vstrImageFilenamesRGB.empty())
+-    {
+-        std::cerr << std::endl << "No images found in provided path." << std::endl;
+-        return 1;
+-    }
+ 
+     // Device
+     torch::DeviceType device_type;
+@@ -114,56 +105,117 @@ int main(int argc, char **argv)
+ 
+     // Vector for tracking time statistics
+     std::vector<float> vTimesTrack;
+-    vTimesTrack.resize(nImages);
+ 
+     std::cout << std::endl << "-------" << std::endl;
+     std::cout << "Start processing sequence ..." << std::endl;
+-    std::cout << "Images in the sequence: " << nImages << std::endl << std::endl;
++    std::cout << "Incremental mode: polling " << strFile << " for new frames." << std::endl;
++    std::cout << "(create a 'DONE' file in the sequence dir to signal end-of-stream)" << std::endl << std::endl;
+ 
+-    // Main loop
++    // Main loop (incremental)
+     cv::Mat im;
+-    for (int ni = 0; ni < nImages; ni++)
++    int ni = 0;
++    double lostSinceT = -1.0;             // 连续丢跟踪的起始时间戳（<0 = 未丢）
++    const double kLostResetAfterS = 15.0; // 连续丢跟踪超过 15s → 重置活动地图
++    while (true)
+     {
+         if (pSLAM->isShutDown())
+             break;
+-        // Read image and depthmap from file
+-        im = cv::imread(std::string(argv[4]) + "/" + vstrImageFilenamesRGB[ni], cv::IMREAD_UNCHANGED); //,cv::IMREAD_UNCHANGED);
+-        cv::cvtColor(im, im, CV_BGR2RGB);
+-        double tframe = vTimestamps[ni];
+ 
+-        if (im.empty())
++        // Re-read rgb.txt to pick up new frames
++        vstrImageFilenamesRGB.clear();
++        vTimestamps.clear();
++        LoadImages(strFile, vstrImageFilenamesRGB, vTimestamps);
++
++        if ((int)vstrImageFilenamesRGB.size() <= ni)
+         {
+-            std::cerr << std::endl << "Failed to load image at: "
+-                      << std::string(argv[4]) << "/" << vstrImageFilenamesRGB[ni] << std::endl;
+-            return 1;
++            // No new frames: check for end-of-stream sentinel
++            if (std::filesystem::exists(std::filesystem::path(argv[4]) / "DONE"))
++            {
++                std::cout << "[M4.1] DONE sentinel found, stopping input." << std::endl;
++                break;
++            }
++            usleep(200000);  // 200ms
++            continue;
+         }
+ 
+-        if (imageScale != 1.f)
++        for (; ni < (int)vstrImageFilenamesRGB.size(); ni++)
+         {
+-            int width = im.cols * imageScale;
+-            int height = im.rows * imageScale;
+-            cv::resize(im, im, cv::Size(width, height));
++            // Read image from file
++            im = cv::imread(std::string(argv[4]) + "/" + vstrImageFilenamesRGB[ni], cv::IMREAD_UNCHANGED);
++            if (im.empty())
++            {
++                std::cerr << "Failed to load " << vstrImageFilenamesRGB[ni] << ", retrying next poll." << std::endl;
++                usleep(100000);  // 100ms, frame may be half-written
++                break;  // retry this frame on next poll (ni not incremented)
++            }
++            cv::cvtColor(im, im, CV_BGR2RGB);
++            double tframe = vTimestamps[ni];
++
++            if (imageScale != 1.f)
++            {
++                int width = im.cols * imageScale;
++                int height = im.rows * imageScale;
++                cv::resize(im, im, cv::Size(width, height));
++            }
++
++            // 测试钩子：TUM_PACE_MS>0 时每帧 usleep，让输入与实时跟踪线程同步
++            // （本地回放/合成序列验证丢跟踪重置用；实时推流下默认关闭，自然按网络节奏）
++            {
++                static int paceMs = -1;
++                if (paceMs < 0) {
++                    const char* env = std::getenv("TUM_PACE_MS");
++                    paceMs = (env && atoi(env) > 0) ? atoi(env) : 0;
++                }
++                if (paceMs > 0) usleep(paceMs * 1000);
++            }
++
++            std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
++
++            // Pass the image to the SLAM system
++            pSLAM->TrackMonocular(im, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
++
++            // M7.5: 跟踪状态日志 + 重初始化卡住兜底。
++            // 注：ORB-SLAM3 本身在「丢跟踪 3s 重定位失败」后会自动建新地图重新初始化
++            //（RECENTLY_LOST→LOST→新地图），因此无需在这里再做过早重置；
++            // 这里兜底「重初始化长时间卡住」（NOT_INITIALIZED>30s 且曾 OK 过）的情况。
++            {
++                static int lastLoggedState = -999;
++                static bool hasBeenOk = false;
++                static double notInitSince = -1.0;
++                int trackState = pSLAM->GetTrackingState();
++                if (trackState != lastLoggedState)
++                {
++                    std::cout << "[M7.5] 状态变化 " << lastLoggedState << " -> " << trackState
++                              << " (t=" << tframe << "s, frame " << ni + 1 << ")"
++                              << " [-1=未就绪 0=无图像 1=未初始化 2=OK 3=刚丢 4=丢失]" << std::endl;
++                    lastLoggedState = trackState;
++                }
++                if (trackState == (int)ORB_SLAM3::Tracking::OK)
++                    hasBeenOk = true;
++                if (trackState == (int)ORB_SLAM3::Tracking::NOT_INITIALIZED && hasBeenOk)
++                {
++                    if (notInitSince < 0.0)
++                        notInitSince = tframe;
++                    else if (tframe - notInitSince > 30.0)
++                    {
++                        std::cout << "[M7.5] 重初始化卡住 " << (tframe - notInitSince)
++                                  << "s，重置活动地图重试…" << std::endl;
++                        pSLAM->ResetActiveMap();
++                        notInitSince = -1.0;
++                    }
++                }
++                else
++                {
++                    notInitSince = -1.0;
++                }
++            }
++
++
++            std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
++
++            double ttrack = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
++            vTimesTrack.push_back(ttrack);
+         }
+-
+-        std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+-
+-        // Pass the image to the SLAM system
+-        pSLAM->TrackMonocular(im, tframe, std::vector<ORB_SLAM3::IMU::Point>(), vstrImageFilenamesRGB[ni]);
+-
+-        std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
+-
+-        double ttrack = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
+-        vTimesTrack[ni] = ttrack;
+-
+-        // Wait to load the next frame
+-        double T = 0;
+-        if (ni < nImages - 1)
+-            T = vTimestamps[ni + 1] - tframe;
+-        else if (ni > 0)
+-            T = tframe - vTimestamps[ni - 1];
+-
+-        if (ttrack < T)
+-            usleep((T - ttrack) * 1e6);
+     }
+ 
+     // Stop all threads
+diff --git a/include/gaussian_model.h b/include/gaussian_model.h
+index 9e5599a..29138aa 100644
+--- a/include/gaussian_model.h
++++ b/include/gaussian_model.h
+@@ -144,6 +144,8 @@ public:
+     void loadPly(std::filesystem::path ply_path);
+     void savePly(std::filesystem::path result_path);
+     void saveSparsePointsPly(std::filesystem::path result_path);
++    void saveSplatDelta(std::filesystem::path result_dir, const int iteration);
++    void saveSplatFull(std::filesystem::path result_dir, const int iteration);
+ 
+     float percentDense();
+     void setPercentDense(const float percent_dense);
+@@ -167,6 +169,10 @@ public:
+     torch::Tensor xyz_gradient_accum_;
+     torch::Tensor denom_;
+     torch::Tensor exist_since_iter_;
++    torch::Tensor gaussian_id_;                     // stable per-gaussian id (int64)
++    int64_t next_gaussian_id_ = 0;                 // next id to assign (monotonic)
++    int64_t last_exported_max_id_ = -1;            // max id already exported
++    std::vector<int64_t> removed_gaussian_ids_;    // ids pruned since last delta export
+ 
+     std::vector<torch::Tensor> Tensor_vec_xyz_,
+                                Tensor_vec_feature_dc_,
+diff --git a/src/gaussian_mapper.cpp b/src/gaussian_mapper.cpp
+index ecd6f4d..906a7c9 100644
+--- a/src/gaussian_mapper.cpp
++++ b/src/gaussian_mapper.cpp
+@@ -510,6 +510,8 @@ void GaussianMapper::run()
+             combineMappingOperations();
+             if (cull_keyframes_)
+                 cullKeyframes();
++            // M4.3: export splat delta (online) after integrating new mapping operations
++            gaussians_->saveSplatDelta(result_dir_, getIteration());
+         }
+ 
+         // Invoke training once
+@@ -520,7 +522,7 @@ void GaussianMapper::run()
+             SLAM_ended_ = true;
+         }
+ 
+-        if (SLAM_ended_ || getIteration() >= opt_params_.iterations_)
++        if (getIteration() >= opt_params_.iterations_)
+             break;
+     }
+ 
+@@ -538,6 +540,11 @@ void GaussianMapper::run()
+     savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
+     writeKeyframeUsedTimes(result_dir_ / "used_times", "final");
+ 
++    // M5.2: 最终结果也写到 live/snapshot.ply，供 WS 推浏览器显示最终版
++    std::filesystem::create_directories(result_dir_ / "live");
++    gaussians_->savePly(result_dir_ / "live" / "snapshot.ply");
++    gaussians_->saveSplatFull(result_dir_, getIteration());  // M7.1: id-indexed 全量同步
++
+     signalStop();
+ }
+ 
+@@ -604,6 +611,11 @@ void GaussianMapper::trainColmap()
+     savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
+     writeKeyframeUsedTimes(result_dir_ / "used_times", "final");
+ 
++    // M5.2: 最终结果也写到 live/snapshot.ply，供 WS 推浏览器显示最终版
++    std::filesystem::create_directories(result_dir_ / "live");
++    gaussians_->savePly(result_dir_ / "live" / "snapshot.ply");
++    gaussians_->saveSplatFull(result_dir_, getIteration());  // M7.1: id-indexed 全量同步
++
+     signalStop();
+ }
+ 
+@@ -770,6 +782,13 @@ void GaussianMapper::trainForOneIteration()
+             gaussians_->optimizer_->step();
+             gaussians_->optimizer_->zero_grad(true);
+         }
++
++        // M4.4: periodic live snapshot for Web push (overwrite the same file)
++        if (getIteration() % 300 == 0) {
++            std::filesystem::create_directories(result_dir_ / "live");
++            gaussians_->savePly(result_dir_ / "live" / "snapshot.ply");
++            gaussians_->saveSplatFull(result_dir_, getIteration());  // M7.1: id-indexed 全量同步
++        }
+     }
+ }
+ 
+diff --git a/src/gaussian_model.cpp b/src/gaussian_model.cpp
+index 1f454c4..b9bbdcc 100644
+--- a/src/gaussian_model.cpp
++++ b/src/gaussian_model.cpp
+@@ -168,6 +168,12 @@ void GaussianModel::createFromPcd(
+         {fused_point_cloud.size(0)},
+         torch::TensorOptions().dtype(torch::kInt32).device(device_type_));
+ 
++    this->gaussian_id_ = torch::arange(
++        this->next_gaussian_id_, this->next_gaussian_id_ + num_points,
++        torch::TensorOptions().dtype(torch::kLong).device(device_type_));
++    this->next_gaussian_id_ += num_points;
++    this->last_exported_max_id_ = -1;  // next delta export marks all current as added
++
+     this->xyz_ = fused_point_cloud.requires_grad_();
+     this->features_dc_ = features.index({torch::indexing::Slice(),
+                                          torch::indexing::Slice(),
+@@ -589,6 +595,14 @@ void GaussianModel::prunePoints(torch::Tensor& mask)
+ {
+     auto valid_points_mask = ~mask;
+ 
++    // Record pruned gaussian ids (mask=true => removed)
++    if (this->gaussian_id_.numel() > 0) {
++        torch::Tensor removed_ids = this->gaussian_id_.masked_select(mask).to(torch::kCPU);
++        auto acc = removed_ids.accessor<int64_t, 1>();
++        for (int64_t i = 0; i < acc.size(0); ++i)
++            this->removed_gaussian_ids_.push_back(acc[i]);
++    }
++
+     // _prune_optimizer
+     std::vector<torch::Tensor> optimizable_tensors(6);
+     auto& param_groups = this->optimizer_->param_groups();
+@@ -634,6 +648,7 @@ void GaussianModel::prunePoints(torch::Tensor& mask)
+     GAUSSIAN_MODEL_TENSORS_TO_VEC
+ 
+     this->exist_since_iter_ = this->exist_since_iter_.index({valid_points_mask});
++    this->gaussian_id_ = this->gaussian_id_.index({valid_points_mask});
+ 
+     this->xyz_gradient_accum_ = this->xyz_gradient_accum_.index({valid_points_mask});
+ 
+@@ -708,6 +723,15 @@ void GaussianModel::densificationPostfix(
+ 
+     this->exist_since_iter_ = torch::cat({this->exist_since_iter_, new_exist_since_iter}, /*dim=*/0);
+ 
++    {
++        int64_t n_new = new_exist_since_iter.size(0);
++        torch::Tensor new_ids = torch::arange(
++            this->next_gaussian_id_, this->next_gaussian_id_ + n_new,
++            torch::TensorOptions().dtype(torch::kLong).device(device_type_));
++        this->gaussian_id_ = torch::cat({this->gaussian_id_, new_ids}, /*dim=*/0);
++        this->next_gaussian_id_ += n_new;
++    }
++
+     this->xyz_gradient_accum_ = torch::zeros({this->getXYZ().size(0), 1}, torch::TensorOptions().device(device_type_));
+     this->denom_ = torch::zeros({this->getXYZ().size(0), 1}, torch::TensorOptions().device(device_type_));
+     this->max_radii2D_ = torch::zeros({this->getXYZ().size(0)}, torch::TensorOptions().device(device_type_));
+@@ -1128,4 +1152,125 @@ float GaussianModel::exponLrFunc(int step)
+     float t = std::clamp(static_cast<float>(step) / max_steps_, 0.0f, 1.0f);
+     float log_lerp = std::exp(std::log(lr_init_) * (1 - t) + std::log(lr_final_) * t);
+     return delay_rate * log_lerp;
+-}
+\ No newline at end of file
++}
++
++// M7.1: 序列化一个高斯的 62 个 float（savePly 顺序，小端；云 x86_64 与浏览器均小端）。
++// 参数指针为 CPU 连续张量的数据指针；frest 形状 (N,15,3) 连续，通道主序写出：
++//   f_rest_[c*15+r] = frest[r*3+c]，等价 savePly 的 features_rest.transpose(1,2).flatten()。
++static void writeGaussian62(std::ofstream& out,
++                            const float* xyz, const float* fdc, const float* frest,
++                            float opacity, const float* scale, const float* rot)
++{
++    auto wf = [&](float v) { out.write(reinterpret_cast<const char*>(&v), 4); };
++    for (int k = 0; k < 3; ++k) wf(xyz[k]);            // x,y,z
++    for (int k = 0; k < 3; ++k) wf(0.0f);             // nx,ny,nz（savePly 恒 0）
++    for (int k = 0; k < 3; ++k) wf(fdc[k]);           // f_dc_0..2
++    for (int c = 0; c < 3; ++c)                       // f_rest_0..44（通道主序 c*15+r）
++        for (int r = 0; r < 15; ++r) wf(frest[r * 3 + c]);
++    wf(opacity);                                      // opacity
++    for (int k = 0; k < 3; ++k) wf(scale[k]);         // scale_0..2
++    for (int k = 0; k < 4; ++k) wf(rot[k]);           // rot_0..3
++}
++
++void GaussianModel::saveSplatDelta(std::filesystem::path result_dir, const int iteration)
++{
++    std::filesystem::create_directories(result_dir / "deltas");
++
++    torch::Tensor ids_cpu = this->gaussian_id_.detach().to(torch::kCPU);
++    auto ids_acc = ids_cpu.accessor<int64_t, 1>();
++    int64_t n_total = ids_cpu.size(0);
++
++    // 收集 added 的 id 与其张量下标（稳妥起见不假设「added=后缀」，用下标映射）
++    std::vector<int64_t> added_ids, added_idx;
++    for (int64_t i = 0; i < n_total; ++i)
++        if (ids_acc[i] > this->last_exported_max_id_) {
++            added_ids.push_back(ids_acc[i]);
++            added_idx.push_back(i);
++        }
++
++    std::vector<int64_t> removed_ids = this->removed_gaussian_ids_;
++    this->removed_gaussian_ids_.clear();
++
++    for (auto id : added_ids)
++        if (id > this->last_exported_max_id_)
++            this->last_exported_max_id_ = id;
++
++    if (added_ids.empty() && removed_ids.empty())
++        return;
++
++    torch::Tensor xyz     = this->xyz_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor fdc     = this->features_dc_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor frest   = this->features_rest_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor opacity = this->opacity_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor scale   = this->scaling_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor rot     = this->rotation_.detach().to(torch::kCPU).contiguous();
++
++    const float* xyz_p     = xyz.data_ptr<float>();
++    const float* fdc_p     = fdc.data_ptr<float>();
++    const float* frest_p   = frest.data_ptr<float>();
++    const float* opacity_p = opacity.data_ptr<float>();
++    const float* scale_p   = scale.data_ptr<float>();
++    const float* rot_p     = rot.data_ptr<float>();
++
++    std::filesystem::path delta_path = result_dir / "deltas" / ("delta_" + std::to_string(iteration) + ".bin");
++    std::filesystem::path delta_tmp  = result_dir / "deltas" / ("delta_" + std::to_string(iteration) + ".bin.tmp");
++    std::ofstream out(delta_tmp, std::ios::binary);
++    uint32_t added_n   = (uint32_t)added_idx.size();
++    uint32_t removed_n = (uint32_t)removed_ids.size();
++    out.write(reinterpret_cast<const char*>(&added_n), 4);
++    out.write(reinterpret_cast<const char*>(&removed_n), 4);
++    for (size_t k = 0; k < added_idx.size(); ++k) {
++        int64_t i = added_idx[k];
++        int64_t id = ids_acc[i];
++        out.write(reinterpret_cast<const char*>(&id), 8);
++        writeGaussian62(out, xyz_p + i * 3, fdc_p + i * 3, frest_p + i * 45,
++                        opacity_p[i], scale_p + i * 3, rot_p + i * 4);
++    }
++    for (auto id : removed_ids)
++        out.write(reinterpret_cast<const char*>(&id), 8);
++    out.close();
++    std::filesystem::rename(delta_tmp, delta_path);  // 原子改名，避免 Node 读到半截
++}
++
++void GaussianModel::saveSplatFull(std::filesystem::path result_dir, const int iteration)
++{
++    std::filesystem::create_directories(result_dir / "deltas");
++
++    torch::Tensor ids_cpu = this->gaussian_id_.detach().to(torch::kCPU);
++    auto ids_acc = ids_cpu.accessor<int64_t, 1>();
++    int64_t n_total = ids_cpu.size(0);
++
++    torch::Tensor xyz     = this->xyz_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor fdc     = this->features_dc_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor frest   = this->features_rest_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor opacity = this->opacity_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor scale   = this->scaling_.detach().to(torch::kCPU).contiguous();
++    torch::Tensor rot     = this->rotation_.detach().to(torch::kCPU).contiguous();
++
++    const float* xyz_p     = xyz.data_ptr<float>();
++    const float* fdc_p     = fdc.data_ptr<float>();
++    const float* frest_p   = frest.data_ptr<float>();
++    const float* opacity_p = opacity.data_ptr<float>();
++    const float* scale_p   = scale.data_ptr<float>();
++    const float* rot_p     = rot.data_ptr<float>();
++
++    std::filesystem::path full_path = result_dir / "deltas" / ("full_" + std::to_string(iteration) + ".bin");
++    std::filesystem::path full_tmp  = result_dir / "deltas" / ("full_" + std::to_string(iteration) + ".bin.tmp");
++    std::ofstream out(full_tmp, std::ios::binary);
++    uint32_t count = (uint32_t)n_total;
++    out.write(reinterpret_cast<const char*>(&count), 4);
++    int64_t max_id = -1;
++    for (int64_t i = 0; i < n_total; ++i) {
++        int64_t id = ids_acc[i];
++        if (id > max_id) max_id = id;
++        out.write(reinterpret_cast<const char*>(&id), 8);
++        writeGaussian62(out, xyz_p + i * 3, fdc_p + i * 3, frest_p + i * 45,
++                        opacity_p[i], scale_p + i * 3, rot_p + i * 4);
++    }
++    out.close();
++    std::filesystem::rename(full_tmp, full_path);  // 原子改名，避免 Node 读到半截
++
++    // 全量同步后把增量基线归零：后续 delta 只含「全量之后的」新增/删除。
++    this->last_exported_max_id_ = max_id;
++    this->removed_gaussian_ids_.clear();
++}

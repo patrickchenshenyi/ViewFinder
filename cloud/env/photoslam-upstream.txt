@@ -1,0 +1,3 @@
+f8bfb2f Update README.md
+origin	https://githubproxy.cc/https://github.com/HuajianUP/Photo-SLAM.git (fetch)
+origin	https://githubproxy.cc/https://github.com/HuajianUP/Photo-SLAM.git (push)

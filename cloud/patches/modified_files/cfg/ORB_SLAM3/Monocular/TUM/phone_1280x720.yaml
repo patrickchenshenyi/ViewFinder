@@ -1,0 +1,85 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# ViewFinder 手机相机配置（ORB-SLAM3 monocular）—— 横屏 1280x720 @ 10fps
+# 对应 M3 实时流：IP Webcam 1280x720 → ffmpeg fps=10 抽帧 → TUM 序列
+# 用法：
+#   ./bin/tum_mono ./ORB-SLAM3/Vocabulary/ORBvoc.txt \
+#       ./cfg/ORB_SLAM3/Monocular/TUM/phone_1280x720.yaml \
+#       ./cfg/gaussian_mapper/Monocular/TUM/tum_mono.yaml \
+#       <seq目录> <输出目录> no_viewer
+#
+# 内参来源（2026-09-24，一加 15 / PLK110 / Android 16）：
+#   adb shell dumpsys media.camera → HAL 静态块 0（后置主摄，Facing=Back, Orientation=90）
+#   LENS_INTRINSIC_CALIBRATION = [2855.6819, 2855.2139, 2025.5520, 1526.7463, 0]（像素，全像素阵列坐标系）
+#   SENSOR_INFO_PIXEL_ARRAY_SIZE = 4096x3072，ACTIVE_ARRAY = (0,0,4096,3072)，PHYSICAL_SIZE = 8.192x6.144 mm
+#   LENS_DISTORTION = [0,0,0,0,0]（设备未报畸变；是否真的无畸变需棋盘格标定确认）
+#   换算：1280x720 是 16:9，从 4:3 传感器【居中裁剪】得 crop=(0,384,4096,2304)，再各向同性缩放到 1280x720
+#         scale = 1280/4096 = 0.3125（= 720/2304，各向同性）→ fx,fy × 0.3125；cx,cy 先减去上边距 384 再 × 0.3125
+#   复现：python3 scripts/android_intrinsics.py --dump tools/_captures/camera_dump.txt --hal 0 \
+#             --center-crop 16:9 --out 1280,720 --rotate 0        # 等价于 --crop-ltwh 0,384,4096,2304
+#   dump 复现：bash scripts/adb.sh shell dumpsys media.camera > tools/_captures/camera_dump.txt
+#   自检：fx≈fy；fx/W=0.70；水平 FOV 71.3°（机身自报 72.5°，差 1.2°）；
+#         由焦距 5.59mm 推导 fx=2795，与出厂标定差 2.1%（厂商报的物理尺寸是标称值）
+#   ✅ 已实测验证（2026-09-24，IP Webcam 正在推流时抓活体 dumpsys）：
+#       活跃 App = com.pas.webcam；流 = 1280x720(PRIVATE) / 1280x720(YUV_420_888) / 1920x1080(JPEG)
+#       android.scaler.cropRegion    = [0 0 4096 3072]    ← App 请求的（全画幅，别拿它算）
+#       android.scaler.rawCropRegion = [0 384 4096 2304]  ← 硬件实读，按 QTI 的 (x,y,w,h) 解读
+#                                                          = 4096x2304，正好 16:9 且正好居中 ✅
+#       zoomRatio=1.0  videoStabilizationMode=OFF  autoframingState=INACTIVE（无 EIS/变焦/自动取景干扰）
+#       HTTP /shot.jpg = 1280x720；RTSP = h264 1280x720（m3_pull_rtsp.sh 拉的正是这条）
+#       → 与下方内参逐项对比差 0.000%（复现：python3 scripts/verify_live_intrinsics.py --rtsp）
+#       （只看 cropRegion 会误判成「4:3 硬拉成 16:9、fx≠fy 差 33%」；设备 croppingType=CENTER_ONLY，
+#         HAL 按输出宽高比居中裁剪，真实区域在 rawCropRegion 里）
+#   ⚠️ 仍未验证：画面里的剩余畸变是否为 0（LENS_DISTORTION 全 0，但设备不保证真没畸变）
+#       → 需要时用 docs/android_camera_intrinsics.md §7 的棋盘格标定确认。
+#--------------------------------------------------------------------------------------------
+File.version: "1.0"
+
+Camera.type: "PinHole"
+
+# 相机内参（单位：像素），参考帧 = 1280x720 横屏。来自真机出厂标定。
+Camera1.fx: 892.400000
+Camera1.fy: 892.253125
+Camera1.cx: 632.984375
+Camera1.cy: 357.109375
+
+# 畸变（OpenCV 径向+切向模型）。LENS_DISTORTION 全 0 = 设备未报畸变；待棋盘格标定确认。
+Camera1.k1: 0.000000
+Camera1.k2: 0.000000
+Camera1.p1: 0.000000
+Camera1.p2: 0.000000
+Camera1.k3: 0.000000
+
+# 帧率：必须与 ffmpeg 抽帧帧率、rgb.txt 时间戳步长一致（脚本 FPS=10）
+Camera.fps: 10
+
+# 颜色顺序（0: BGR, 1: RGB）。ffmpeg 抽出的 PNG 是 RGB。
+Camera.RGB: 1
+
+# 分辨率：必须与实际喂进去的帧一致（IP Webcam 1280x720 = ffmpeg 抽帧 = 此处）
+Camera.width: 1280
+Camera.height: 720
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters（保持默认）
+#--------------------------------------------------------------------------------------------
+ORBextractor.nFeatures: 2000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 10
+ORBextractor.minThFAST: 5
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters（headless 加 no_viewer 时忽略）
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0

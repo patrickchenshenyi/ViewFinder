@@ -1,0 +1,65 @@
+# ==============================================================================
+# ViewFinder — 版本库忽略规则
+# ==============================================================================
+# 三条原则：
+#   1) 密钥绝不入库（.env 全系列）
+#   2) 大体积 / 可再生的数据与构建产物不入库 —— 重新获取方式见 build_guide.md §2.2
+#   3) 云实例专属资产必须入库（cloud/、m6/abl/）—— 那些「只活在实例上」的东西
+#
+# ⚠️ .gitignore 不支持行尾注释：下面所有 "#" 注释都独占一行。
+# ==============================================================================
+
+# ------------------------------------------------------------------ 密钥
+.env
+**/.env
+**/.env.local
+
+# ------------------------------------------------------------------ 临时草稿
+# 注意：.tmp/installation_guide.md 已于 2026-09-28 提升为 docs/operations_guide.md
+.tmp/
+
+# ------------------------------------------------- 数据集 / 训练产物（可再生）
+sample_videos/*
+!sample_videos/m6_test_video.mp4
+
+# 训练结果、case 归档、抽帧工作目录（云端各占 5–47 GB）
+results/
+
+# ------------------------------------------------------------- 通用生成物
+.DS_Store
+**/__pycache__/
+*.py[cod]
+*.log
+
+# --------------------------------------------------- 本机专用工具与产物
+.adbhome/
+.android/
+tools/platform-tools/
+tools/_venv/
+tools/_downloads/
+tools/_captures/
+tools/_smoke/
+
+# 误建的 _smoke 嵌套副本（tools/tools/_smoke/*.png）
+tools/tools/
+
+# Brush 原生应用（第三方发行版，145 MB；下载 URL + sha256 见 build_guide.md §4.3）
+tools/Brush.app/
+tools/brush/
+
+# ------------------------------------------------- 查看器依赖与运行日志
+tools/splat-web/node_modules/
+tools/splat-web/.npm-cache/
+tools/splat-web/.server.log
+tools/splat-web/.viewer-events.log
+
+# ------------------------------------------------- 查看器静态演示数据
+# 仓库只保留 default.ply（4.4 MB）保证开箱即可渲染。
+# 另外两个 25 MB 级模型是运行产物（可从云端 case 重新导出）。
+# 想连大模型一起入库（+50 MB）：删掉下面两行，然后 git add -f。
+tools/splat-web/dist/splats/m5_original.ply
+tools/splat-web/dist/splats/m6_processed.ply
+
+# ---------------------------------------------------------------- Python venv
+3DGS_demo/.venv/
+3DGS_demo/.mplcache/

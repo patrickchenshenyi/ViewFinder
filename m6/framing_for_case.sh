@@ -30,6 +30,11 @@ fi
 [ -f "$CAM" ] || { echo "[framing] 缺 cameras $CAM"; exit 1; }
 
 rm -rf "$WORK"; mkdir -p "$WORK/proxy" "$WORK/final" "$WORK/screen" "$WORK/vlm" "$OUT"
+# 收尾清理：成功 / 报错 / Ctrl-C 都清掉 WORK，避免 /tmp 泄漏。
+# 中间产物（proxy、screen、final、vlm、candidates.json…）都只是过程数据，
+# 最终交付物已在上方拷贝进 $OUT（framing.json + top-3 PNG）。
+# 背景：此前没有这行，累积泄漏了 6.7 GB（14 个 /tmp/framing_* 目录）。
+trap 'rm -rf "$WORK"; echo "[framing] 已清理临时目录 $WORK"' EXIT
 echo "[framing] case=$TS  ply=$PLY"
 
 cd "$M6"
